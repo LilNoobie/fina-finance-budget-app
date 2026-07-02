@@ -1492,7 +1492,7 @@ function renderTxnTable(){
           ${isShared?`<span class="split-badge${t._full?' full':''}" onclick="toggleFull('${t._id}')" title="${t._full?'Counting full amount — click to split':'Counting your share (½) — click for full'}">${t._full?'1':'½'}</span>`:''}
         </div>
       </td>
-      <td style="text-align:right"><button class="excl-btn${t._skip?' restore':''}" onclick="toggleSkip('${t._id}')" title="${t._skip?'Restore to budget':'Exclude from budget calculations'}">${t._skip?'restore':'exclude'}</button></td>
+      <td style="text-align:right;white-space:nowrap"><button class="excl-btn${t._skip?' restore':''}" onclick="toggleSkip('${t._id}')" title="${t._skip?'Restore to budget':'Exclude from budget calculations'}">${t._skip?'restore':'exclude'}</button><button class="excl-btn" onclick="deleteTxn('${t._id}')" title="Delete permanently" style="margin-left:6px;color:var(--rose-dark);border-color:var(--rose)">✕</button></td>
     </tr>`;
   }).join('');
   wrap.innerHTML=`<div class="table-wrap">
@@ -1526,6 +1526,13 @@ function updateCat(id,cat){
 function toggleSkip(id){
   const key=cmk();const txns=(S.monthlyHistory[key]||{}).transactions||[];
   const t=txns.find(t=>t._id===id);if(t){t._skip=!t._skip;persist();renderTxnTable();}
+}
+function deleteTxn(id){
+  const key=cmk();const rec=S.monthlyHistory[key];if(!rec)return;
+  const t=(rec.transactions||[]).find(t=>t._id===id);
+  if(!confirm(`Delete "${t?.merchant||'this transaction'}" permanently?`))return;
+  rec.transactions=(rec.transactions||[]).filter(t=>t._id!==id);
+  persist();renderTxn();showToast('Transaction deleted','ok');
 }
 function toggleFull(id){
   const key=cmk();const txns=(S.monthlyHistory[key]||{}).transactions||[];
