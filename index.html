@@ -460,17 +460,7 @@ async function _sbPersist(){
       if(monthRows.length){
         await _sb.from('monthly_transactions').upsert(monthRows,{onConflict:'user_id,month_key'});
       }
-      // NW snapshots — delete all + reinsert (snapshots are infrequent, ~12/year)
-      await _sb.from('nw_snapshots').delete().eq('user_id',_sbUser.id);
-      if((S.nwSnapshots||[]).length){
-        await _sb.from('nw_snapshots').insert(
-          S.nwSnapshots.map(s=>({
-            user_id:_sbUser.id,date:s.date,
-            net:s.net,assets:s.assets,liabs:s.liabs,
-            accts:s.accts||null,notes:s.notes||null
-          }))
-        );
-      }
+      // NW snapshots live in the settings blob above (small, always read whole).
     }catch(e){console.warn('Supabase sync:',e);}
   },1500);
 }
@@ -497,18 +487,18 @@ async function _sbLoad(){
     }else if(legacyHistory){
       S.monthlyHistory=legacyHistory;
     }
-    // 3. NW snapshots (fall back to blob on first migration)
-    const{data:snapRows}=await _sb.from('nw_snapshots')
-      .select('date,net,assets,liabs,accts,notes')
-      .eq('user_id',_sbUser.id).order('date',{ascending:true});
-    // Prefer the dedicated table only if it actually has more rows than the
-    // blob; otherwise keep the blob's snapshots (never wipe local data with an
-    // empty/failed table read).
-    if(snapRows&&snapRows.length&&snapRows.length>=(S.nwSnapshots||[]).length){
-      S.nwSnapshots=snapRows.map(r=>({
-        date:r.date,net:Number(r.net),assets:Number(r.assets),
-        liabs:Number(r.liabs),accts:r.accts,notes:r.notes
-      }));
+    // 3. NW snapshots now live in the settings blob. One-time migration only:
+    // if the blob has none but the legacy nw_snapshots table does, pull them in.
+    if(!(S.nwSnapshots||[]).length){
+      const{data:snapRows}=await _sb.from('nw_snapshots')
+        .select('date,net,assets,liabs,accts,notes')
+        .eq('user_id',_sbUser.id).order('date',{ascending:true});
+      if(snapRows&&snapRows.length){
+        S.nwSnapshots=snapRows.map(r=>({
+          date:r.date,net:Number(r.net),assets:Number(r.assets),
+          liabs:Number(r.liabs),accts:r.accts,notes:r.notes
+        }));
+      }
     }
     localStorage.setItem('fina_v1',JSON.stringify(S));
   }catch(e){console.warn('Supabase load:',e);}
