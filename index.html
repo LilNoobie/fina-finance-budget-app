@@ -2268,7 +2268,11 @@ function saveNWSnapshot(){
   const accts={};S.nwAccounts.forEach(a=>{accts[a.name]=pc(a.value);});
   const notes=document.getElementById('nwNotes')?.value||'';
   S.nwFields={notes};
-  S.nwSnapshots.push({date:new Date().toISOString(),net:assets-liabs,assets,liabs,accts,notes});
+  const dv=document.getElementById('snapshotDate')?.value;
+  // Use the picked date (noon local to avoid TZ rollback); fall back to now
+  const snapDate=dv?new Date(dv+'T12:00:00').toISOString():new Date().toISOString();
+  S.nwSnapshots.push({date:snapDate,net:assets-liabs,assets,liabs,accts,notes});
+  S.nwSnapshots.sort((a,b)=>new Date(a.date)-new Date(b.date));
   // Clear asset amounts for a fresh entry next snapshot (accounts stay, values reset)
   S.nwAccounts.forEach(a=>a.value='');
   persist();renderNetWorth();drawWhenReady('nwChartCanvas','nwChartEmpty',S.nwSnapshots,window._nwRange||'all','#B8728A','rgba(184,114,138,0.15)');showToast('Snapshot saved!','ok');
