@@ -1222,8 +1222,9 @@ function txnSaveNewCard(){
 function showAddTxnModal(){
   if(!S.cards.length){showToast('Add a card first','err');return;}
   const today=new Date().toISOString().slice(0,10);
-  const cardOpts=S.cards.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
-  const firstCard=S.cards[0];
+  const cardOpts=S.cards.filter(c=>!c.cash).map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')
+    +`<option value="__cash__">💵 Cash / other (no card)</option>`;
+  const firstCard=S.cards.find(c=>!c.cash)||S.cards[0];
   const catOpts=(firstCard.budgets||[]).map(b=>`<option value="${esc(b.cat||b.name)}">${esc(b.name)}</option>`).join('');
   const html=`<div class="modal-overlay" id="addTxnOverlay" onclick="if(event.target===this)closeAddTxnModal()">
     <div class="modal" style="animation:fadeUp .2s ease both">
@@ -1241,6 +1242,7 @@ function showAddTxnModal(){
           <div><div class="field-label">Card</div>
             <select class="field-inp" id="atxn-card" style="padding:8px 10px" onchange="updateAddTxnCats(this.value)">${cardOpts}</select>
           </div>
+          <div id="atxn-cash-row" style="display:none"><div class="field-label">Source name</div><input type="text" class="field-inp" id="atxn-cash-name" placeholder="e.g. Cash, Venmo, Zelle" value="Cash"></div>
           <div><div class="field-label">Category</div>
             <select class="field-inp" id="atxn-cat" style="padding:8px 10px">${catOpts||'<option value="Other">Other</option>'}</select>
           </div>
@@ -1253,8 +1255,18 @@ function showAddTxnModal(){
   setTimeout(()=>document.getElementById('atxn-merchant')?.focus(),50);
 }
 function updateAddTxnCats(cardId){
-  const card=S.cards.find(c=>c.id===cardId);
   const sel=document.getElementById('atxn-cat');if(!sel)return;
+  const cashRow=document.getElementById('atxn-cash-row');
+  if(cardId==='__cash__'){
+    if(cashRow)cashRow.style.display='';
+    // Cash has no card budgets — offer the union of all categories
+    const allCats=[...new Set(S.cards.flatMap(c=>(c.budgets||[]).map(b=>b.cat||b.name)))].filter(c=>c&&c!=='Other').sort();
+    allCats.push('Other');
+    sel.innerHTML=allCats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
+    return;
+  }
+  if(cashRow)cashRow.style.display='none';
+  const card=S.cards.find(c=>c.id===cardId);
   const cats=(card?.budgets||[]);
   sel.innerHTML=cats.length?cats.map(b=>`<option value="${esc(b.cat||b.name)}">${esc(b.name)}</option>`).join(''):'<option value="Other">Other</option>';
 }
@@ -1263,10 +1275,16 @@ function saveAddTxn(){
   const date=document.getElementById('atxn-date')?.value;
   const amt=parseFloat(document.getElementById('atxn-amt')?.value);
   const merchant=document.getElementById('atxn-merchant')?.value?.trim();
-  const cardId=document.getElementById('atxn-card')?.value;
+  let cardId=document.getElementById('atxn-card')?.value;
   const category=document.getElementById('atxn-cat')?.value||'Other';
   if(!merchant){showToast('Enter a merchant','err');return;}
   if(isNaN(amt)||amt<=0){showToast('Enter a valid amount','err');return;}
+  if(cardId==='__cash__'){
+    const nm=(document.getElementById('atxn-cash-name')?.value||'').trim()||'Cash';
+    let cc=S.cards.find(c=>c.cash&&c.name.toLowerCase()===nm.toLowerCase());
+    if(!cc){cc={id:uid(),name:nm,type:'personal',split:100,cash:true,noUpload:true,color:GOAL_COLORS[S.cards.length%GOAL_COLORS.length],budgets:[]};S.cards.push(cc);}
+    cardId=cc.id;
+  }
   const key=cmk();
   if(!S.monthlyHistory[key])S.monthlyHistory[key]={transactions:[]};
   S.monthlyHistory[key].transactions.push({_id:uid(),date,merchant,amount:amt,category,cardId,_manual:true});
@@ -1339,8 +1357,9 @@ function renderTxn(){
   const key=cmk();
   const A=computeActuals(key);
   const note=(S.monthlyHistory[key]||{}).note||'';
-  const cols=S.cards.length<=2?S.cards.length:3;
-  const zones=S.cards.map(card=>{
+  const uploadCards=S.cards.filter(c=>!c.noUpload);
+  const cols=uploadCards.length<=2?uploadCards.length:3;
+  const zones=uploadCards.map(card=>{
     const txns=(S.monthlyHistory[key]||{}).transactions||[];
     const ct=txns.filter(t=>t.cardId===card.id).length;
     const parsed=ct>0;
@@ -1376,7 +1395,7 @@ function renderTxn(){
       <div class="stat"><div class="stat-lbl">Variable budget</div><div class="stat-val">${fd(A.varBud)}</div></div>
       <div class="stat"><div class="stat-lbl">${A.varAct<=A.varBud?'Under':'Over'} budget</div><div class="stat-val" style="color:${A.varAct<=A.varBud?'var(--sage-dark)':'var(--rose-dark)'}">${fd(Math.abs(A.varBud-A.varAct))}</div></div>
     </div>
-    <div class="upload-row" style="grid-template-columns:repeat(${Math.min(cols,Math.max(S.cards.length,1))},1fr)" id="uploadZonesWrap">${S.cards.length?zones:txnNoCardsHTML()}</div>
+    <div class="upload-row" style="grid-template-columns:repeat(${Math.min(cols,Math.max(uploadCards.length,1))},1fr)" id="uploadZonesWrap">${uploadCards.length?zones:txnNoCardsHTML()}</div>
     <div class="filter-bar">
       <div class="search-wrap">
         <span class="search-icon">🔍</span>
