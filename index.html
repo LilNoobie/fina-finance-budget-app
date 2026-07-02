@@ -2265,6 +2265,7 @@ function addNWLiab(){
 function saveNWSnapshot(){
   const assets=S.nwAccounts.reduce((s,a)=>s+pc(a.value),0);
   const liabs=S.nwLiabilities.reduce((s,l)=>s+pc(l.value),0);
+  if(assets===0&&liabs===0){showToast('Enter account values before saving a snapshot','err');return;}
   const accts={};S.nwAccounts.forEach(a=>{accts[a.name]=pc(a.value);});
   const notes=document.getElementById('nwNotes')?.value||'';
   S.nwFields={notes};
@@ -2273,8 +2274,6 @@ function saveNWSnapshot(){
   const snapDate=dv?new Date(dv+'T12:00:00').toISOString():new Date().toISOString();
   S.nwSnapshots.push({date:snapDate,net:assets-liabs,assets,liabs,accts,notes});
   S.nwSnapshots.sort((a,b)=>new Date(a.date)-new Date(b.date));
-  // Clear asset amounts for a fresh entry next snapshot (accounts stay, values reset)
-  S.nwAccounts.forEach(a=>a.value='');
   persist();renderNetWorth();drawWhenReady('nwChartCanvas','nwChartEmpty',S.nwSnapshots,window._nwRange||'all','#B8728A','rgba(184,114,138,0.15)');showToast('Snapshot saved!','ok');
 }
 function deleteNWSnap(i){S.nwSnapshots.splice(i,1);persist();renderNetWorth();showToast('Deleted','ok');}
