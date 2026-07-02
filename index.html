@@ -891,19 +891,30 @@ function computeActuals(monthKey){
   });
   const catActuals={};
   let varBud=0,varAct=0;
-  S.cards.forEach(card=>{
-    const ca=card.type==='shared'?(byCard[card.id]||{}):personalPool;
+  // Personal cards: deduplicate categories so catActuals and varAct count each category once
+  const seenPersonalCats=new Set();
+  S.cards.filter(c=>c.type!=='shared').forEach(card=>{
     (card.budgets||[]).forEach(b=>{
-      const act=ca[b.cat||b.name]||0;
+      const cat=b.cat||b.name;
+      const act=personalPool[cat]||0;
+      varBud+=b.budget;
+      if(!seenPersonalCats.has(cat)){seenPersonalCats.add(cat);catActuals[cat]=(catActuals[cat]||0)+act;varAct+=act;}
+    });
+  });
+  // Shared cards: per-card lookup
+  S.cards.filter(c=>c.type==='shared').forEach(card=>{
+    (card.budgets||[]).forEach(b=>{
+      const cat=b.cat||b.name;
+      const act=(byCard[card.id]||{})[cat]||0;
       varBud+=b.budget;varAct+=act;
-      catActuals[b.cat||b.name]=(catActuals[b.cat||b.name]||0)+act;
+      catActuals[cat]=(catActuals[cat]||0)+act;
     });
   });
   const fixedBud=(S.fixedItems||[]).reduce((s,i)=>s+i.budget,0);
   const savBud=(S.savingsItems||[]).reduce((s,i)=>s+i.budget,0);
   const totalBud=varBud+fixedBud+savBud;
   const totalAct=varAct+fixedBud+savBud;
-  return{txns,byCard,catActuals,varBud,varAct,fixedBud,savBud,totalBud,totalAct,delta:totalBud-totalAct};
+  return{txns,byCard,personalPool,catActuals,varBud,varAct,fixedBud,savBud,totalBud,totalAct,delta:totalBud-totalAct};
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1094,10 +1105,26 @@ function buildDonutData(A){
 
 function buildMovers(A){
   const movers=[];
-  S.cards.forEach(card=>{
+  // Personal cards: one mover per category, sum budgets across cards, compare to personalPool
+  const personalBudByCat={};
+  S.cards.filter(c=>c.type!=='shared').forEach(card=>{
     (card.budgets||[]).forEach(b=>{
       if(!b.budget)return;
-      const act=A.catActuals[b.cat||b.name]||0;
+      const cat=b.cat||b.name;
+      if(!personalBudByCat[cat])personalBudByCat[cat]={name:b.name,budget:0};
+      personalBudByCat[cat].budget+=b.budget;
+    });
+  });
+  Object.entries(personalBudByCat).forEach(([cat,{name,budget}])=>{
+    const act=A.personalPool[cat]||0;
+    const diff=act-budget;
+    if(Math.abs(diff)>5)movers.push({name,diff,dir:diff>0?'over':'under'});
+  });
+  // Shared cards: per-card comparison
+  S.cards.filter(c=>c.type==='shared').forEach(card=>{
+    (card.budgets||[]).forEach(b=>{
+      if(!b.budget)return;
+      const act=(A.byCard[card.id]||{})[b.cat||b.name]||0;
       const diff=act-b.budget;
       if(Math.abs(diff)>5)movers.push({name:b.name,diff,dir:diff>0?'over':'under'});
     });
@@ -1191,6 +1218,61 @@ function txnSaveNewCard(){
   const card={id:uid(),name,type,split,color:GOAL_COLORS[S.cards.length%GOAL_COLORS.length],budgets:[]};
   S.cards.push(card);closeTxnAddCardModal();persist();renderTxn();showToast(`"${name}" added`,'ok');
 }
+
+function showAddTxnModal(){
+  if(!S.cards.length){showToast('Add a card first','err');return;}
+  const today=new Date().toISOString().slice(0,10);
+  const cardOpts=S.cards.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  const firstCard=S.cards[0];
+  const catOpts=(firstCard.budgets||[]).map(b=>`<option value="${esc(b.cat||b.name)}">${esc(b.name)}</option>`).join('');
+  const html=`<div class="modal-overlay" id="addTxnOverlay" onclick="if(event.target===this)closeAddTxnModal()">
+    <div class="modal" style="animation:fadeUp .2s ease both">
+      <div class="modal-head">
+        <div class="modal-title">Add transaction</div>
+        <button class="modal-close" onclick="closeAddTxnModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div style="display:grid;gap:12px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div><div class="field-label">Date</div><input type="date" class="field-inp" id="atxn-date" value="${today}"></div>
+            <div><div class="field-label">Amount ($)</div><input type="number" class="field-inp" id="atxn-amt" placeholder="0.00" min="0" step="0.01"></div>
+          </div>
+          <div><div class="field-label">Merchant</div><input type="text" class="field-inp" id="atxn-merchant" placeholder="e.g. Whole Foods"></div>
+          <div><div class="field-label">Card</div>
+            <select class="field-inp" id="atxn-card" style="padding:8px 10px" onchange="updateAddTxnCats(this.value)">${cardOpts}</select>
+          </div>
+          <div><div class="field-label">Category</div>
+            <select class="field-inp" id="atxn-cat" style="padding:8px 10px">${catOpts||'<option value="Other">Other</option>'}</select>
+          </div>
+          <button class="add-entry-btn" onclick="saveAddTxn()" style="background:var(--rose);width:100%;padding:11px;font-size:14px;border-radius:10px">Add transaction</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend',html);
+  setTimeout(()=>document.getElementById('atxn-merchant')?.focus(),50);
+}
+function updateAddTxnCats(cardId){
+  const card=S.cards.find(c=>c.id===cardId);
+  const sel=document.getElementById('atxn-cat');if(!sel)return;
+  const cats=(card?.budgets||[]);
+  sel.innerHTML=cats.length?cats.map(b=>`<option value="${esc(b.cat||b.name)}">${esc(b.name)}</option>`).join(''):'<option value="Other">Other</option>';
+}
+function closeAddTxnModal(){document.getElementById('addTxnOverlay')?.remove();}
+function saveAddTxn(){
+  const date=document.getElementById('atxn-date')?.value;
+  const amt=parseFloat(document.getElementById('atxn-amt')?.value);
+  const merchant=document.getElementById('atxn-merchant')?.value?.trim();
+  const cardId=document.getElementById('atxn-card')?.value;
+  const category=document.getElementById('atxn-cat')?.value||'Other';
+  if(!merchant){showToast('Enter a merchant','err');return;}
+  if(isNaN(amt)||amt<=0){showToast('Enter a valid amount','err');return;}
+  const key=cmk();
+  if(!S.monthlyHistory[key])S.monthlyHistory[key]={transactions:[]};
+  S.monthlyHistory[key].transactions.push({_id:uid(),date,merchant,amount:amt,category,cardId,_manual:true});
+  persist();closeAddTxnModal();renderTxn();showToast('Transaction added','ok');
+}
+
 function txnNoCardsHTML(){
   return`<div style="background:var(--sf);border:1px solid var(--bd);border-radius:var(--r-lg);padding:16px 18px;grid-column:1/-1">
     <div style="font-size:13px;font-weight:600;color:var(--tx);margin-bottom:4px">Add your first card</div>
@@ -1301,6 +1383,7 @@ function renderTxn(){
         <input class="search-inp" type="text" id="txnSearch" placeholder="Search merchant or category…" oninput="renderTxnTable()">
       </div>
       <div id="filterChips"></div>
+      <button class="export-btn" onclick="showAddTxnModal()" style="margin-left:auto;color:var(--rose-dark);border-color:var(--rose);white-space:nowrap">+ Add transaction</button>
     </div>
     <div id="txnTableWrap"></div>
   </div>`;
@@ -1969,7 +2052,7 @@ function renderNetWorth(){
   const lastSnap=S.nwSnapshots.length?S.nwSnapshots[S.nwSnapshots.length-1]:null;
   const delta=lastSnap?net-lastSnap.net:null;
 
-  const groups=[{label:'Investments',types:['investment']},{label:'Crypto',types:['crypto']},{label:'Cash & savings',types:['cash']},{label:'Other',types:['other']}];
+  const groups=[{label:'Investments',types:['investment']},{label:'Retirement',types:['retirement']},{label:'Crypto',types:['crypto']},{label:'Cash & savings',types:['cash']},{label:'Other',types:['other']}];
   const acctSecs=groups.map(g=>{
     const accts=S.nwAccounts.filter(a=>g.types.includes(a.type));
     if(!accts.length)return'';
@@ -2057,8 +2140,9 @@ function renderNetWorth(){
         ${acctSecs||'<div style="font-size:12px;color:var(--mu);padding:8px 0">No accounts yet</div>'}
         <div class="nw-add-row">
           <input class="nw-add-inp" id="new-acc-name" placeholder="Account name" type="text">
-          <select class="nw-add-inp" id="new-acc-type" style="flex:0;width:110px;padding:6px 8px">
+          <select class="nw-add-inp" id="new-acc-type" style="flex:0;width:130px;padding:6px 8px">
             <option value="investment">Investment</option>
+            <option value="retirement">Retirement</option>
             <option value="crypto">Crypto</option>
             <option value="cash">Cash</option>
             <option value="other">Other</option>
