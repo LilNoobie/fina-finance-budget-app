@@ -2948,6 +2948,40 @@ function drawFinaChart(canvasId,emptyId,snapsAll,range,lineColor,fillColor){
     ctx.textAlign=i===0?'left':i===snaps.length-1?'right':'center';
     ctx.fillText(lbl,x,H-6);
   });
+  // Store dot positions (CSS px) for hover tooltips
+  canvas._points=snaps.map((s,i)=>({x:xp(i),y:yp(vals[i]),net:s.net,date:s.date}));
+  attachChartHover(canvas);
+}
+
+function _getChartTip(){
+  let t=document.getElementById('chartHoverTip');
+  if(!t){
+    t=document.createElement('div');t.id='chartHoverTip';
+    t.style.cssText='position:fixed;transform:translate(-50%,-100%);background:var(--tx);color:var(--sf);padding:5px 9px;border-radius:6px;font-size:12px;font-family:var(--fn);pointer-events:none;z-index:9999;white-space:nowrap;box-shadow:0 2px 8px rgba(44,36,32,.22);display:none;text-align:center;line-height:1.35';
+    document.body.appendChild(t);
+  }
+  return t;
+}
+function attachChartHover(canvas){
+  if(canvas._hoverBound)return;
+  canvas._hoverBound=true;
+  canvas.addEventListener('mousemove',e=>{
+    const pts=canvas._points;if(!pts||!pts.length)return;
+    const r=canvas.getBoundingClientRect();
+    const mx=e.clientX-r.left,my=e.clientY-r.top;
+    let best=null,bd=1e9;
+    pts.forEach(p=>{const d=Math.hypot(p.x-mx,p.y-my);if(d<bd){bd=d;best=p;}});
+    const tip=_getChartTip();
+    if(best&&bd<18){
+      canvas.style.cursor='pointer';
+      const dt=new Date(best.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+      tip.innerHTML=`<div style="font-weight:600">${fd(best.net)}</div><div style="font-size:10px;opacity:.75">${dt}</div>`;
+      tip.style.display='block';
+      tip.style.left=(r.left+best.x)+'px';
+      tip.style.top=(r.top+best.y-8)+'px';
+    }else{canvas.style.cursor='';tip.style.display='none';}
+  });
+  canvas.addEventListener('mouseleave',()=>{const t=document.getElementById('chartHoverTip');if(t)t.style.display='none';canvas.style.cursor='';});
 }
 
 
