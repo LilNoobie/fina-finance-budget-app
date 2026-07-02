@@ -1098,29 +1098,26 @@ function buildDonutData(A){
 
 function buildMovers(A){
   const movers=[];
-  // Personal cards: one mover per category, sum budgets across cards, compare to personalPool
-  const personalBudByCat={};
-  S.cards.filter(c=>c.type!=='shared').forEach(card=>{
+  // Aggregate by category across ALL cards (personal + shared) so the same
+  // category is summed into a single over/under figure.
+  const budByCat={},nameByCat={};
+  S.cards.forEach(card=>{
     (card.budgets||[]).forEach(b=>{
       if(!b.budget)return;
       const cat=b.cat||b.name;
-      if(!personalBudByCat[cat])personalBudByCat[cat]={name:b.name,budget:0};
-      personalBudByCat[cat].budget+=b.budget;
+      budByCat[cat]=(budByCat[cat]||0)+b.budget;
+      if(!nameByCat[cat])nameByCat[cat]=b.name;
     });
   });
-  Object.entries(personalBudByCat).forEach(([cat,{name,budget}])=>{
-    const act=A.personalPool[cat]||0;
-    const diff=act-budget;
-    if(Math.abs(diff)>5)movers.push({name,diff,dir:diff>0?'over':'under'});
-  });
-  // Shared cards: per-card comparison
+  // Shared actual spend per category (personal spend already lives in personalPool)
+  const sharedActByCat={};
   S.cards.filter(c=>c.type==='shared').forEach(card=>{
-    (card.budgets||[]).forEach(b=>{
-      if(!b.budget)return;
-      const act=(A.byCard[card.id]||{})[b.cat||b.name]||0;
-      const diff=act-b.budget;
-      if(Math.abs(diff)>5)movers.push({name:b.name,diff,dir:diff>0?'over':'under'});
-    });
+    Object.entries(A.byCard[card.id]||{}).forEach(([cat,v])=>{sharedActByCat[cat]=(sharedActByCat[cat]||0)+v;});
+  });
+  Object.keys(budByCat).forEach(cat=>{
+    const act=(A.personalPool[cat]||0)+(sharedActByCat[cat]||0);
+    const diff=act-budByCat[cat];
+    if(Math.abs(diff)>5)movers.push({name:nameByCat[cat],diff,dir:diff>0?'over':'under'});
   });
   movers.sort((a,b)=>Math.abs(b.diff)-Math.abs(a.diff));
   return[...movers.filter(m=>m.dir==='over').slice(0,2),...movers.filter(m=>m.dir==='under').slice(0,2)];
