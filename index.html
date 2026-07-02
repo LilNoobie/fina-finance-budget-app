@@ -443,8 +443,10 @@ async function _sbPersist(){
   clearTimeout(_sbTimer);
   _sbTimer=setTimeout(async()=>{
     try{
-      // Settings blob — excludes heavy arrays
-      const{monthlyHistory,nwSnapshots,...settings}=S;
+      // Settings blob — excludes only the heavy monthly transactions.
+      // nwSnapshots are kept in the blob (small, ~12/yr) so they always persist
+      // even if the dedicated nw_snapshots table write fails.
+      const{monthlyHistory,...settings}=S;
       await _sb.from('user_settings').upsert(
         {user_id:_sbUser.id,budget:settings,updated_at:new Date().toISOString()},
         {onConflict:'user_id'}
@@ -480,12 +482,11 @@ async function _sbLoad(){
     const{data:settingsRow,error}=await _sb.from('user_settings')
       .select('budget').eq('user_id',_sbUser.id).maybeSingle();
     if(error)throw error;
-    let legacyHistory=null,legacySnaps=null;
+    let legacyHistory=null;
     if(settingsRow?.budget){
-      const{monthlyHistory,nwSnapshots,...settings}=settingsRow.budget;
+      const{monthlyHistory,...settings}=settingsRow.budget;
       S={...defaultState(),...settings};
       legacyHistory=monthlyHistory||null;
-      legacySnaps=nwSnapshots||null;
     }
     // 2. Monthly transactions (fall back to blob on first migration)
     const{data:txnRows}=await _sb.from('monthly_transactions')
@@ -500,13 +501,14 @@ async function _sbLoad(){
     const{data:snapRows}=await _sb.from('nw_snapshots')
       .select('date,net,assets,liabs,accts,notes')
       .eq('user_id',_sbUser.id).order('date',{ascending:true});
-    if(snapRows&&snapRows.length){
+    // Prefer the dedicated table only if it actually has more rows than the
+    // blob; otherwise keep the blob's snapshots (never wipe local data with an
+    // empty/failed table read).
+    if(snapRows&&snapRows.length&&snapRows.length>=(S.nwSnapshots||[]).length){
       S.nwSnapshots=snapRows.map(r=>({
         date:r.date,net:Number(r.net),assets:Number(r.assets),
         liabs:Number(r.liabs),accts:r.accts,notes:r.notes
       }));
-    }else if(legacySnaps){
-      S.nwSnapshots=legacySnaps;
     }
     localStorage.setItem('fina_v1',JSON.stringify(S));
   }catch(e){console.warn('Supabase load:',e);}
@@ -931,7 +933,8 @@ function renderDash(){
   const others=S.goals.filter(g=>g!==starred);
   const nwNet=calcNWNet();
   const lastSnap=S.nwSnapshots.length?S.nwSnapshots[S.nwSnapshots.length-1]:null;
-  const nwDelta=lastSnap?nwNet-lastSnap.net:null;
+  const prevSnap=S.nwSnapshots.length>1?S.nwSnapshots[S.nwSnapshots.length-2]:null;
+  const nwDelta=lastSnap&&prevSnap?lastSnap.net-prevSnap.net:null;
   const donut=buildDonutData(A);
   const movers=buildMovers(A);
   const today_=new Date();
@@ -2066,6 +2069,9 @@ function deleteGoalEntry(goalId,entryId){
 // NET WORTH
 // ══════════════════════════════════════════════════════════════
 function calcNWNet(){
+  // Net worth reflects the latest saved snapshot, not the live input rows
+  // (those are the working values for the NEXT snapshot).
+  if(S.nwSnapshots&&S.nwSnapshots.length)return S.nwSnapshots[S.nwSnapshots.length-1].net;
   const assets=S.nwAccounts.reduce((s,a)=>s+pc(a.value),0);
   const liabs=S.nwLiabilities.reduce((s,l)=>s+pc(l.value),0);
   return assets-liabs;
@@ -2074,12 +2080,14 @@ function calcNWNet(){
 function renderNetWorth(){
   const shell=document.getElementById('mainShell');
   const net=calcNWNet();
-  const assets=S.nwAccounts.reduce((s,a)=>s+pc(a.value),0);
-  const liabs=S.nwLiabilities.reduce((s,l)=>s+pc(l.value),0);
+  const lastSnap=S.nwSnapshots.length?S.nwSnapshots[S.nwSnapshots.length-1]:null;
+  const prevSnap=S.nwSnapshots.length>1?S.nwSnapshots[S.nwSnapshots.length-2]:null;
+  // Headline figures reflect the latest snapshot; fall back to live inputs before any snapshot exists
+  const assets=lastSnap?lastSnap.assets:S.nwAccounts.reduce((s,a)=>s+pc(a.value),0);
+  const liabs=lastSnap?lastSnap.liabs:S.nwLiabilities.reduce((s,l)=>s+pc(l.value),0);
   const pct=Math.min(Math.max(net/(S.nwGoal||1),0),1);
   const off=449*(1-pct);
-  const lastSnap=S.nwSnapshots.length?S.nwSnapshots[S.nwSnapshots.length-1]:null;
-  const delta=lastSnap?net-lastSnap.net:null;
+  const delta=lastSnap&&prevSnap?lastSnap.net-prevSnap.net:null;
 
   const groups=[{label:'Investments',types:['investment']},{label:'Retirement',types:['retirement']},{label:'Crypto',types:['crypto']},{label:'Cash & savings',types:['cash']},{label:'Other',types:['other']}];
   const acctSecs=groups.map(g=>{
