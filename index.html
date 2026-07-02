@@ -2255,12 +2255,12 @@ function addNWAcc(){
   const name=document.getElementById('new-acc-name')?.value?.trim();
   const type=document.getElementById('new-acc-type')?.value||'other';
   if(!name)return;
-  S.nwAccounts.push({id:uid(),name,type,value:'0'});persist();renderNetWorth();
+  S.nwAccounts.push({id:uid(),name,type,value:''});persist();renderNetWorth();
 }
 function addNWLiab(){
   const name=document.getElementById('new-liab-name')?.value?.trim();
   if(!name)return;
-  S.nwLiabilities.push({id:uid(),name,value:'0'});persist();renderNetWorth();
+  S.nwLiabilities.push({id:uid(),name,value:''});persist();renderNetWorth();
 }
 function saveNWSnapshot(){
   const assets=S.nwAccounts.reduce((s,a)=>s+pc(a.value),0);
@@ -2269,6 +2269,8 @@ function saveNWSnapshot(){
   const notes=document.getElementById('nwNotes')?.value||'';
   S.nwFields={notes};
   S.nwSnapshots.push({date:new Date().toISOString(),net:assets-liabs,assets,liabs,accts,notes});
+  // Clear asset amounts for a fresh entry next snapshot (accounts stay, values reset)
+  S.nwAccounts.forEach(a=>a.value='');
   persist();renderNetWorth();drawWhenReady('nwChartCanvas','nwChartEmpty',S.nwSnapshots,window._nwRange||'all','#B8728A','rgba(184,114,138,0.15)');showToast('Snapshot saved!','ok');
 }
 function deleteNWSnap(i){S.nwSnapshots.splice(i,1);persist();renderNetWorth();showToast('Deleted','ok');}
